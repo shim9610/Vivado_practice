@@ -1,0 +1,31 @@
+#!/bin/bash
+
+BENCH_NAME=distributed_fifo_tb
+DUT_NAME=distributed_fifo
+
+# Clean
+if [ "$1" == "clean" ]; then
+    rm -rf xsim.dir .Xil
+    rm -f *.log *.jou *.pb *.wdb xvlog.* xelab.* webtalk*
+    echo "[INFO] Clean done."
+    exit 0
+fi
+
+# Compile
+xvlog ./$DUT_NAME.v ./$BENCH_NAME.v
+
+# Elaborate
+xelab $BENCH_NAME -debug wave -s $BENCH_NAME
+
+# Run simulation
+xsim $BENCH_NAME -R
+
+# Open GUI with waveform if wcfg exists
+WCFG_FILE=./$BENCH_NAME.wcfg
+if [ -f "$WCFG_FILE" ]; then
+    echo "[INFO] Found wcfg: $WCFG_FILE"
+    xsim $BENCH_NAME -gui -view "$WCFG_FILE"
+else
+    echo "[INFO] No wcfg found, opening default GUI."
+    xsim $BENCH_NAME -gui
+fi
