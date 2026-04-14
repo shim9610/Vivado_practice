@@ -1,3 +1,5 @@
+// BRAM입니다 이름이랑 다름 ㅠㅠ
+
 `timescale 1ns / 1ps
 module distributed_fifo #(
     parameter DATA_WIDTH = 8,
@@ -22,9 +24,9 @@ module distributed_fifo #(
     wire ready = (~(wp_pointer ==r_pointer) & ~(wpp_pointer ==r_pointer));
     wire valid = ~(r_pointer == w_pointer);
     
-    (* ram_style = "distributed" *)
+    (* ram_style = "block", ram_extract = "yes" *) 
     reg [DATA_WIDTH-1:0] data_buffer[BUFFER_SIZE-1:0];
-    wire [DATA_WIDTH-1:0] read_value = data_buffer[r_pointer];
+  
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////Write Data from RingBuffer///////////////////////////////////////////////
@@ -34,6 +36,7 @@ module distributed_fifo #(
         if (reset == 1) begin
             w_pointer   <= 0;
             ready_s_r   <= 0;
+
         end else begin
             ready_s_r   <=  ready;
             if (ready_s_r & valid_s) begin
@@ -50,18 +53,59 @@ module distributed_fifo #(
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////Read Data from RingBuffer///////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    wire handshake = (valid & ready_m);
+    reg valid_m_r;
+    reg [DATA_WIDTH-1:0] data_out_r,data_out_r1;
+    reg [DATA_WIDTH-1:0] data_out_r0 [1:0];
+    reg write_flag;
+    reg read_flag;
+    reg [1:0] data_num;
+    reg is_write;
+
+    wire handshake = (valid_m_r & ready_m);
+    wire write_condition = is_write && (data_num < 2);
+    wire read_condition = (handshake | ~valid_m_r) && (data_num != 0);
+    wire available_flag =   write_condition && is_write;
     always @(posedge clk or posedge reset) begin
         if (reset == 1) begin
+            valid_m_r   <=  0;
+            write_flag  <=  0;
+            read_flag   <=  0;
             r_pointer   <=  0;
-        end else if (handshake) begin
-            r_pointer   <=  rp_pointer;
+            data_out_r0[0] <=  0;
+            data_out_r0[1] <=  0;
+            data_num    <=  0;
+            is_write        <=  0;
+        end else begin
+            if (valid && & (data_num < 2)) begin  // 데이터 슬롯이 2개 미만일 때만 r_pointer를 이동시키고 데이터를 읽어옴
+                r_pointer       <=  rp_pointer;
+                data_out_r1   <=  data_buffer[r_pointer];
+                is_write    <=  1;
+            end else begin
+                is_write    <=  available_flag ^ is_write; // 데이터 슬롯이 꽉 찬경우 XOR 연산으로 is_write를 토글하여 뒷단의 버퍼에서 data_out_r1을 소비했는지 여부에따라 is_write 토글
+            end
+
+            if (write_condition) begin // 쓰기조건 만족시 data_out_r0에 데이터 쓰기 write_flag 스위칭으로 2칸을 사용
+                data_out_r0[write_flag]   <=  data_out_r1;
+                write_flag      <=  ~write_flag;
+            end 
+
+            if (read_condition) begin // 읽기조건 만족시 data_out_r0에서 데이터 꺼내기 read_flag 스위칭으로 2칸을 사용
+                data_out_r  <=  data_out_r0[read_flag];
+                read_flag   <=  ~read_flag;
+            end
+
+
+            if (handshake | ~valid_m_r) begin // 핸드쉐이크 발생하거나 valid_m_r이 0인 경우 valid_m_r 업데이트
+                valid_m_r   <=  (data_num != 0);
+            end
+
+            data_num    <=   (data_num + (write_condition && is_write)) - read_condition; // 해당 클럭에서 발생한 이벤트 기반으로 data_num 계산
         end
-    end
+    end산
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////output port assign/////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    assign data_out = read_value;
+    assign data_out = data_out_r;
     assign ready_s  = ready_s_r;
-    assign valid_m  = valid;
+    assign valid_m  = valid_m_r;
 endmodule
